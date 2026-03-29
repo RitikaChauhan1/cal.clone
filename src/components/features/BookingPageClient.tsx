@@ -1,83 +1,37 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { ChevronLeft, ChevronRight, Clock, CalendarDays, CheckCircle2, Globe } from "lucide-react";
-import type { EventType, Booking, BookingStatus } from "@/types";
+import * as Toast from "@radix-ui/react-toast";
+import { ChevronLeft, ChevronRight, Clock, CalendarDays, CheckCircle2, Globe, Loader2 } from "lucide-react";
+import type { EventType } from "@/types";
+import { Button } from "@/components/ui/Button";
 
-// ─── Storage keys (must match other pages) ───────────────────────────────────
-const AVAIL_KEY = "cal_availability";
-const EVENTS_KEY = "cal_event_types";
-const BOOKINGS_KEY = "cal_bookings";
-
-// ─── Types ───────────────────────────────────────────────────────────────────
-interface DaySchedule { enabled: boolean; start: string; end: string; }
-interface AvailabilityState { timezone: string; days: Record<string, DaySchedule>; }
+// Enhanced Date/Time Logic Using date-fns and date-fns-tz
+import { addMinutes, format, parseISO, isBefore, isAfter, isEqual } from "date-fns";
+import { fromZonedTime } from "date-fns-tz";
 
 const DAYS_OF_WEEK = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+
+interface DaySchedule { enabled: boolean; start: string; end: string; }
+interface AvailabilityState { timezone: string; days: Record<string, DaySchedule>; }
 
 const DEFAULT_AVAIL: AvailabilityState = {
   timezone: "Asia/Kolkata",
   days: {
-    Sunday:    { enabled: false, start: "09:00", end: "17:00" },
-    Monday:    { enabled: true,  start: "09:00", end: "17:00" },
-    Tuesday:   { enabled: true,  start: "09:00", end: "17:00" },
-    Wednesday: { enabled: true,  start: "09:00", end: "17:00" },
-    Thursday:  { enabled: true,  start: "09:00", end: "17:00" },
-    Friday:    { enabled: true,  start: "09:00", end: "17:00" },
-    Saturday:  { enabled: false, start: "09:00", end: "17:00" },
+    Sunday: { enabled: false, start: "09:00", end: "17:00" },
+    Monday: { enabled: true, start: "09:00", end: "17:00" },
+    Tuesday: { enabled: true, start: "09:00", end: "17:00" },
+    Wednesday: { enabled: true, start: "09:00", end: "17:00" },
+    Thursday: { enabled: true, start: "09:00", end: "17:00" },
+    Friday: { enabled: true, start: "09:00", end: "17:00" },
+    Saturday: { enabled: false, start: "09:00", end: "17:00" },
   },
 };
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
 function pad(n: number) { return String(n).padStart(2, "0"); }
 
-function generateSlots(start: string, end: string): string[] {
-  const slots: string[] = [];
-  const [sh, sm] = start.split(":").map(Number);
-  const [eh, em] = end.split(":").map(Number);
-  let mins = sh * 60 + sm;
-  const endMins = eh * 60 + em;
-  while (mins < endMins) {
-    slots.push(`${pad(Math.floor(mins / 60))}:${pad(mins % 60)}`);
-    mins += 30;
-  }
-  return slots;
-}
-
-function formatSlot(t: string): string {
-  const [hStr, mStr] = t.split(":");
-  const h = parseInt(hStr);
-  const ampm = h < 12 ? "am" : "pm";
-  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-  return `${h12}:${mStr}${ampm}`;
-}
-
-function formatDisplayDate(year: number, month: number, day: number): string {
-  const d = new Date(year, month, day);
-  return d.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
-}
-
-function formatConfirmDate(year: number, month: number, day: number, time: string): string {
-  const d = new Date(year, month, day);
-  const dateStr = d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
-  return `${formatSlot(time)} · ${dateStr}`;
-}
-
-function addMins(time: string, duration: number): string {
-  const [h, m] = time.split(":").map(Number);
-  const total = h * 60 + m + duration;
-  return `${pad(Math.floor(total / 60) % 24)}:${pad(total % 60)}`;
-}
-
-function toISODate(year: number, month: number, day: number): string {
-  return `${year}-${pad(month + 1)}-${pad(day)}`;
-}
-
-function uid() { return Math.random().toString(36).slice(2, 10); }
-
-// ─── Calendar ─────────────────────────────────────────────────────────────────
-
+// ─── Component: Calendar ──────────────────────────────────────────────────────
 interface CalendarProps {
   year: number;
   month: number;
@@ -88,15 +42,12 @@ interface CalendarProps {
   onNext: () => void;
 }
 
-const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-
 function Calendar({ year, month, selectedDay, enabledDayNames, onSelectDay, onPrev, onNext }: CalendarProps) {
   const today = new Date();
   const todayY = today.getFullYear();
   const todayM = today.getMonth();
   const todayD = today.getDate();
 
-  // Days in month, first weekday
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const firstWeekday = new Date(year, month, 1).getDay();
 
@@ -105,24 +56,18 @@ function Calendar({ year, month, selectedDay, enabledDayNames, onSelectDay, onPr
     ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
   ];
 
-  // Pad to full weeks
   while (cells.length % 7 !== 0) cells.push(null);
 
   function isDisabled(day: number): boolean {
-    // Past dates disabled
     if (year < todayY) return true;
     if (year === todayY && month < todayM) return true;
     if (year === todayY && month === todayM && day < todayD) return true;
-    // Check availability
     const dayName = DAYS_OF_WEEK[new Date(year, month, day).getDay()];
     return !enabledDayNames.has(dayName);
   }
 
   const weeks = [];
   for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
-
-  // Detect month-boundary weeks for label
-  const nextMonthName = MONTH_NAMES[(month + 1) % 12];
 
   return (
     <div className="book-calendar">
@@ -144,20 +89,9 @@ function Calendar({ year, month, selectedDay, enabledDayNames, onSelectDay, onPr
         {["SUN","MON","TUE","WED","THU","FRI","SAT"].map((d) => (
           <div key={d} className="book-cal-weekday">{d}</div>
         ))}
-
-        {weeks.map((week, wi) => {
-          // Check if this week contains a month boundary
-          const hasBoundary = week.some((d, i) => {
-            if (!d) return false;
-            const nextD = week[i + 1];
-            return d && d === daysInMonth && nextD === null;
-          });
-          // Next month label appears if week crosses into next month
-          const crossesBoundary = week.includes(daysInMonth) && week.includes(null) && wi > 0;
-
-          return week.map((day, di) => {
+        {weeks.map((week, wi) => (
+          week.map((day, di) => {
             if (day === null) {
-              // Could be next month's day visually — we just show empty
               return <div key={`e-${wi}-${di}`} className="book-cal-cell" />;
             }
             const disabled = isDisabled(day);
@@ -179,39 +113,49 @@ function Calendar({ year, month, selectedDay, enabledDayNames, onSelectDay, onPr
                 {isToday && <span className="book-cal-dot" />}
               </button>
             );
-          });
-        })}
+          })
+        ))}
       </div>
     </div>
   );
 }
 
-// ─── Step: Time slots ─────────────────────────────────────────────────────────
-
+// ─── Component: Time Slots ────────────────────────────────────────────────────
 interface TimeSlotsProps {
-  year: number;
-  month: number;
-  day: number;
-  slots: string[];
-  onSelect: (time: string) => void;
+  dateObj: Date;
+  slots: { iso: string; formatted: string; booked: boolean }[];
+  isLoading: boolean;
+  onSelect: (isoTime: string) => void;
 }
 
-function TimeSlots({ year, month, day, slots, onSelect }: TimeSlotsProps) {
-  const d = new Date(year, month, day);
-  const dayLabel = d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
+function TimeSlots({ dateObj, slots, isLoading, onSelect }: TimeSlotsProps) {
+  const dayLabel = format(dateObj, "EEE, MMM d");
+  const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   return (
     <div className="book-slots-panel">
       <div className="book-slots-header">
         <span className="book-slots-day">{dayLabel}</span>
+        <span style={{ display: 'block', fontSize: '12px', color: 'var(--ink-muted)', marginTop: '4px' }}>
+          Times shown in {localTz}
+        </span>
       </div>
       <div className="book-slots-list">
-        {slots.length === 0 ? (
-          <p className="book-slots-empty">No available slots for this day.</p>
+        {isLoading ? (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: '2rem 0', color: 'var(--ink-muted)' }}>
+             <Loader2 size={24} className="spin" />
+          </div>
+        ) : slots.length === 0 ? (
+          <p className="book-slots-empty">No slots available for this day.</p>
         ) : (
           slots.map((slot) => (
-            <button key={slot} className="book-slot-btn" onClick={() => onSelect(slot)}>
-              {formatSlot(slot)}
+            <button
+              key={slot.iso}
+              className={`book-slot-btn${slot.booked ? " booked" : ""}`}
+              disabled={slot.booked}
+              onClick={() => !slot.booked && onSelect(slot.iso)}
+            >
+              {slot.formatted}
             </button>
           ))
         )}
@@ -220,8 +164,7 @@ function TimeSlots({ year, month, day, slots, onSelect }: TimeSlotsProps) {
   );
 }
 
-// ─── Step: Details form ───────────────────────────────────────────────────────
-
+// ─── Component: Details Form ──────────────────────────────────────────────────
 interface DetailsFormProps {
   onBack: () => void;
   onConfirm: (name: string, email: string) => void;
@@ -249,9 +192,9 @@ function DetailsForm({ onBack, onConfirm, dateLabel }: DetailsFormProps) {
 
   return (
     <div className="book-details-panel">
-      <button className="book-back-btn" onClick={onBack}>
+      <Button variant="ghost" className="book-back-btn" onClick={onBack}>
         <ChevronLeft size={14} /> Back
-      </button>
+      </Button>
       <div className="book-details-date">{dateLabel}</div>
 
       <div className="form-field">
@@ -278,15 +221,14 @@ function DetailsForm({ onBack, onConfirm, dateLabel }: DetailsFormProps) {
         {errors.email && <p className="form-error">{errors.email}</p>}
       </div>
 
-      <button className="btn btn-primary book-confirm-btn" onClick={handleSubmit}>
+      <Button variant="primary" className="book-confirm-btn" onClick={handleSubmit}>
         Confirm booking
-      </button>
+      </Button>
     </div>
   );
 }
 
-// ─── Step: Confirmation ───────────────────────────────────────────────────────
-
+// ─── Component: Confirmation ──────────────────────────────────────────────────
 function ConfirmationScreen({ title, name, dateLabel }: { title: string; name: string; dateLabel: string }) {
   return (
     <div className="book-confirmation">
@@ -309,8 +251,7 @@ function ConfirmationScreen({ title, name, dateLabel }: { title: string; name: s
   );
 }
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
-
+// ─── Main Component ───────────────────────────────────────────────────────────
 type Step = "calendar" | "details" | "confirmed";
 
 export function BookingPageClient({ slug }: { slug: string }) {
@@ -318,30 +259,54 @@ export function BookingPageClient({ slug }: { slug: string }) {
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
-  const [selectedTime, setSelectedTime] = useState<string | null>(null);
+  
+  // selectedTime ISO String (Strict UTC)
+  const [selectedTimeISO, setSelectedTimeISO] = useState<string | null>(null);
   const [step, setStep] = useState<Step>("calendar");
   const [confirmedName, setConfirmedName] = useState("");
 
   const [avail, setAvail] = useState<AvailabilityState>(DEFAULT_AVAIL);
   const [eventType, setEventType] = useState<EventType | null>(null);
   const [hydrated, setHydrated] = useState(false);
+  
+  // Stored Bookings strictly from backend
+  const [bookedIntervals, setBookedIntervals] = useState<{ start: Date, end: Date }[]>([]);
+  const [isLoadingSlots, setIsLoadingSlots] = useState(false);
+
+  // Toast State
+  const [toastOpen, setToastOpen] = useState(false);
+  const [toastMsg, setToastMsg] = useState("");
 
   useEffect(() => {
-    try {
-      const rawAvail = localStorage.getItem(AVAIL_KEY);
-      if (rawAvail) setAvail(JSON.parse(rawAvail));
-    } catch {}
-
-    try {
-      const rawEvents = localStorage.getItem(EVENTS_KEY);
-      if (rawEvents) {
-        const events: EventType[] = JSON.parse(rawEvents);
-        const found = events.find((e) => e.slug === slug && e.enabled);
-        setEventType(found ?? null);
+    const fetchAvailability = async () => {
+      try {
+        const res = await fetch("/api/availability-profiles/default");
+        if (res.ok) {
+          const data = await res.json();
+          setAvail(data);
+        }
+      } catch (error) {
+        console.error("Failed to load availability:", error);
       }
-    } catch {}
+    };
 
-    setHydrated(true);
+    const fetchEvent = async () => {
+      try {
+        const res = await fetch(`/api/event-types/slug/${slug}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.isActive) {
+            setEventType(data);
+          }
+        }
+      } catch (e) {
+        console.error("Failed to fetch event", e);
+      }
+    };
+
+    Promise.all([fetchAvailability(), fetchEvent()]).finally(() => {
+      setHydrated(true);
+    });
   }, [slug]);
 
   const enabledDayNames = useMemo(() => {
@@ -352,44 +317,120 @@ export function BookingPageClient({ slug }: { slug: string }) {
     );
   }, [avail]);
 
+  // Fetch blocked booking bounds seamlessly whenever a calendar day is clicked.
+  useEffect(() => {
+    if (selectedDay === null || !eventType) {
+      setBookedIntervals([]);
+      return;
+    }
+    const fetchBookings = async () => {
+      setIsLoadingSlots(true);
+      const hostDateStr = `${year}-${pad(month + 1)}-${pad(selectedDay)}`; 
+      try {
+        const res = await fetch(`/api/bookings?date=${hostDateStr}&eventTypeId=${eventType.id}`);
+        if (res.ok) {
+          const data = await res.json();
+          // Safely map string arrays to Date instances
+          const intervals = data.bookings.map((b: any) => ({
+            start: parseISO(b.startTime),
+            end: parseISO(b.endTime),
+          }));
+          setBookedIntervals(intervals);
+        }
+      } catch (e) {
+        console.error("Failed to fetch booked slots", e);
+      } finally {
+        setIsLoadingSlots(false);
+      }
+    };
+    fetchBookings();
+  }, [selectedDay, year, month, eventType]);
+
+  // Slot Pipeline: Map Host Availability -> Generate UTC Boundary Candidates -> Exclude Overlaps
   const slots = useMemo(() => {
-    if (selectedDay === null) return [];
+    if (selectedDay === null || !eventType) return [];
+    
+    // 1. Identify Host Bounds Object exactly
     const dayName = DAYS_OF_WEEK[new Date(year, month, selectedDay).getDay()];
     const sched = avail.days[dayName];
     if (!sched?.enabled) return [];
-    return generateSlots(sched.start, sched.end);
-  }, [selectedDay, year, month, avail]);
+    
+    // 2. Map pure UTC Date object representations corresponding to host's timezone wall-clock
+    const hostDateStr = `${year}-${pad(month + 1)}-${pad(selectedDay)}`; 
+    const startUtc = fromZonedTime(`${hostDateStr} ${sched.start}:00`, avail.timezone);
+    const endUtc = fromZonedTime(`${hostDateStr} ${sched.end}:00`, avail.timezone);
+    
+    const validSlots: { iso: string; formatted: string; booked: boolean }[] = [];
+    let currentUtc = startUtc;
 
-  const handleSelectTime = (time: string) => {
-    setSelectedTime(time);
+    // 3. Scan & Project 30 Minute Increments
+    while (isBefore(currentUtc, endUtc)) {
+      const candidateEnd = addMinutes(currentUtc, eventType.duration);
+      if (isAfter(candidateEnd, endUtc)) break; // Do not exceed end boundary!
+
+      // Strict Overlap Validation
+      const overlaps = bookedIntervals.some(b =>
+        (isBefore(currentUtc, b.end) && isAfter(candidateEnd, b.start)) ||
+        (isEqual(currentUtc, b.start) && isEqual(candidateEnd, b.end))
+      );
+
+      validSlots.push({
+        iso: currentUtc.toISOString(),
+        formatted: format(currentUtc, "h:mm a"), // Native browser localization!
+        booked: overlaps,
+      });
+
+      currentUtc = addMinutes(currentUtc, 30);
+    }
+    
+    return validSlots;
+  }, [selectedDay, year, month, avail, eventType, bookedIntervals]);
+
+  const handleSelectTime = (isoTime: string) => {
+    setSelectedTimeISO(isoTime);
     setStep("details");
   };
 
-  const handleConfirm = (name: string, email: string) => {
-    if (!selectedDay || !selectedTime || !eventType) return;
-    const duration = eventType.duration;
-    const endTime = addMins(selectedTime, duration);
-    const booking: Booking = {
-      id: uid(),
-      title: eventType.title,
-      attendee: name,
-      date: toISODate(year, month, selectedDay),
-      startTime: selectedTime,
-      endTime,
-      status: "upcoming" as BookingStatus,
-    };
+  const handleConfirm = async (name: string, email: string) => {
+    if (!selectedDay || !selectedTimeISO || !eventType) return;
+    
+    const startUtc = parseISO(selectedTimeISO);
+    const endUtc = addMinutes(startUtc, eventType.duration);
+    
+    // Use the Host wall-clock date string as partitioning key to match fetching behavior
+    const hostDateStr = `${year}-${pad(month + 1)}-${pad(selectedDay)}`; 
+    
     try {
-      const raw = localStorage.getItem(BOOKINGS_KEY);
-      const existing: Booking[] = raw ? JSON.parse(raw) : [];
-      localStorage.setItem(BOOKINGS_KEY, JSON.stringify([...existing, booking]));
-    } catch {}
-    setConfirmedName(name);
-    setStep("confirmed");
+      const res = await fetch("/api/bookings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          eventTypeId: eventType.id,
+          date: hostDateStr,
+          startTime: startUtc.toISOString(),
+          endTime: endUtc.toISOString(),
+          email,
+          name
+        }),
+      });
+      
+      if (!res.ok) {
+        const data = await res.json();
+        setToastMsg(data.error || "Failed to book slot");
+        setToastOpen(true);
+        return;
+      }
+      
+      setConfirmedName(name);
+      setStep("confirmed");
+    } catch {
+      setToastMsg("An unexpected error occurred.");
+      setToastOpen(true);
+    }
   };
 
   if (!hydrated) return null;
 
-  // Event not found or disabled
   if (!eventType) {
     return (
       <div className="book-shell-inner">
@@ -403,84 +444,91 @@ export function BookingPageClient({ slug }: { slug: string }) {
     );
   }
 
-  const dateLabel = selectedDay !== null && selectedTime !== null
-    ? formatConfirmDate(year, month, selectedDay, selectedTime)
-    : "";
+  // Generate localized user confirmation string (e.g. "10:30 AM · Wed, Mar 24, 2026")
+  let dateLabel = "";
+  if (selectedTimeISO) {
+    const d = parseISO(selectedTimeISO);
+    dateLabel = format(d, "h:mm a · EEE, MMM d, yyyy");
+  }
 
   return (
-    <div className="book-shell-inner">
-      <div className="book-card">
-        {/* Left info panel */}
-        <div className="book-info-panel">
-          <div className="book-info-avatar">A</div>
-          <p className="book-info-host">Admin</p>
-          <h1 className="book-info-title">{eventType.title}</h1>
-          {eventType.description && (
-            <p className="book-info-desc">{eventType.description}</p>
-          )}
-          <div className="book-info-meta">
-            <span className="book-info-meta-item">
-              <Clock size={13} />
-              {eventType.duration}m
-            </span>
-            <span className="book-info-meta-item">
-              <Globe size={13} />
-              {avail.timezone}
-            </span>
-          </div>
-        </div>
-
-        {/* Divider */}
-        <div className="book-divider" />
-
-        {/* Right panel — changes per step */}
-        {step === "confirmed" && selectedDay !== null && selectedTime !== null ? (
-          <ConfirmationScreen
-            title={eventType.title}
-            name={confirmedName}
-            dateLabel={formatConfirmDate(year, month, selectedDay, selectedTime)}
-          />
-        ) : step === "details" && selectedDay !== null && selectedTime !== null ? (
-          <DetailsForm
-            onBack={() => setStep("calendar")}
-            onConfirm={handleConfirm}
-            dateLabel={dateLabel}
-          />
-        ) : (
-          // Calendar + optional time slots side by side
-          <div className="book-picker">
-            <Calendar
-              year={year}
-              month={month}
-              selectedDay={selectedDay}
-              enabledDayNames={enabledDayNames}
-              onSelectDay={(day) => { setSelectedDay(day); setSelectedTime(null); }}
-              onPrev={() => {
-                if (month === 0) { setMonth(11); setYear((y) => y - 1); }
-                else setMonth((m) => m - 1);
-                setSelectedDay(null);
-              }}
-              onNext={() => {
-                if (month === 11) { setMonth(0); setYear((y) => y + 1); }
-                else setMonth((m) => m + 1);
-                setSelectedDay(null);
-              }}
-            />
-            {selectedDay !== null && (
-              <>
-                <div className="book-divider book-divider--vertical" />
-                <TimeSlots
-                  year={year}
-                  month={month}
-                  day={selectedDay}
-                  slots={slots}
-                  onSelect={handleSelectTime}
-                />
-              </>
+    <Toast.Provider swipeDirection="right">
+      <div className="book-shell-inner">
+        <div className="book-card">
+          {/* Left panel */}
+          <div className="book-info-panel">
+            <div className="book-info-avatar">A</div>
+            <p className="book-info-host">Admin</p>
+            <h1 className="book-info-title">{eventType.title}</h1>
+            {eventType.description && (
+              <p className="book-info-desc">{eventType.description}</p>
             )}
+            <div className="book-info-meta">
+              <span className="book-info-meta-item">
+                <Clock size={13} />
+                {eventType.duration}m
+              </span>
+              <span className="book-info-meta-item">
+                <Globe size={13} />
+                {avail.timezone}
+              </span>
+            </div>
           </div>
-        )}
+
+          <div className="book-divider" />
+
+          {/* Right panel logic */}
+          {step === "confirmed" && selectedTimeISO ? (
+            <ConfirmationScreen
+              title={eventType.title}
+              name={confirmedName}
+              dateLabel={dateLabel}
+            />
+          ) : step === "details" && selectedTimeISO ? (
+            <DetailsForm
+              onBack={() => setStep("calendar")}
+              onConfirm={handleConfirm}
+              dateLabel={dateLabel}
+            />
+          ) : (
+            <div className="book-picker">
+              <Calendar
+                year={year}
+                month={month}
+                selectedDay={selectedDay}
+                enabledDayNames={enabledDayNames}
+                onSelectDay={(day) => { setSelectedDay(day); setSelectedTimeISO(null); }}
+                onPrev={() => {
+                  if (month === 0) { setMonth(11); setYear((y) => y - 1); }
+                  else setMonth((m) => m - 1);
+                  setSelectedDay(null);
+                }}
+                onNext={() => {
+                  if (month === 11) { setMonth(0); setYear((y) => y + 1); }
+                  else setMonth((m) => m + 1);
+                  setSelectedDay(null);
+                }}
+              />
+              {selectedDay !== null && (
+                <>
+                  <div className="book-divider book-divider--vertical" />
+                  <TimeSlots
+                    dateObj={new Date(year, month, selectedDay)}
+                    slots={slots}
+                    isLoading={isLoadingSlots}
+                    onSelect={handleSelectTime}
+                  />
+                </>
+              )}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+      
+      <Toast.Root className="toast-root" open={toastOpen} onOpenChange={setToastOpen} duration={3500}>
+        <Toast.Description>{toastMsg}</Toast.Description>
+      </Toast.Root>
+      <Toast.Viewport className="toast-viewport" />
+    </Toast.Provider>
   );
 }

@@ -4,7 +4,7 @@ export interface EventType {
   duration: number;
   slug: string;
   description: string;
-  enabled: boolean;
+  isActive: boolean;
   createdAt: string;
 }
 
@@ -14,6 +14,7 @@ export interface Booking {
   id: string;
   title: string;
   attendee: string;
+  email: string;
   date: string;
   startTime: string;
   endTime: string;

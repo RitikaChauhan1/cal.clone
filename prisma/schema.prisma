@@ -1,0 +1,57 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model EventType {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  duration    Int
+  slug        String   @unique
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  bookings    Booking[]
+}
+
+model AvailabilityProfile {
+  id        String             @id @default(uuid())
+  userId    String             @default("admin")
+  name      String
+  timezone  String             @default("Asia/Kolkata")
+  isDefault Boolean            @default(false)
+  createdAt DateTime           @default(now())
+  slots     AvailabilitySlot[]
+}
+
+model AvailabilitySlot {
+  id                    String              @id @default(uuid())
+  availabilityProfileId String
+  dayOfWeek             Int                 // 0-6 (Sunday-Saturday)
+  startTime             String              // "09:00"
+  endTime               String              // "17:00"
+  isActive              Boolean             @default(true)
+  profile               AvailabilityProfile @relation(fields: [availabilityProfileId], references: [id], onDelete: Cascade)
+  
+  @@unique([availabilityProfileId, dayOfWeek])
+}
+
+model Booking {
+  id          String   @id @default(uuid())
+  eventTypeId String
+  date        String
+  startTime   String
+  endTime     String
+  email       String
+  name        String
+  status      String   @default("UPCOMING") // UPCOMING, CANCELLED, PAST
+  createdAt   DateTime @default(now())
+  
+  eventType   EventType @relation(fields: [eventTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([eventTypeId, date, startTime])
+}

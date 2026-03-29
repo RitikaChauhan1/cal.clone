@@ -5,33 +5,11 @@ import * as Dialog from "@radix-ui/react-dialog";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import * as Switch from "@radix-ui/react-switch";
 import * as Toast from "@radix-ui/react-toast";
-import { Plus, Clock, MoreHorizontal, Pencil, Trash2, Link2, X, CalendarDays } from "lucide-react";
+import { Plus, Clock, MoreHorizontal, Pencil, Trash2, Link2, ExternalLink, X, CalendarDays, Loader2, Search } from "lucide-react";
 import type { EventType } from "@/types";
+import { Button } from "@/components/ui/Button";
 
 // ─── helpers ───────────────────────────────────────────────────────────────
-
-const STORAGE_KEY = "cal_event_types";
-
-const DEFAULT_EVENTS: EventType[] = [
-  {
-    id: "1",
-    title: "Quick sync",
-    duration: 15,
-    slug: "quick-sync",
-    description: "A short 15-minute catch-up.",
-    enabled: true,
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: "2",
-    title: "30 min meeting",
-    duration: 30,
-    slug: "30-min-meeting",
-    description: "Standard half-hour meeting.",
-    enabled: true,
-    createdAt: new Date().toISOString(),
-  },
-];
 
 function toSlug(str: string): string {
   return str
@@ -40,10 +18,6 @@ function toSlug(str: string): string {
     .replace(/[^a-z0-9\s-]/g, "")
     .replace(/\s+/g, "-")
     .replace(/-+/g, "-");
-}
-
-function uid(): string {
-  return Math.random().toString(36).slice(2, 10);
 }
 
 // ─── EventForm ─────────────────────────────────────────────────────────────
@@ -63,12 +37,12 @@ function EventForm({
   onCancel,
 }: {
   initial?: EventType;
-  onSave: (data: Omit<EventType, "id" | "createdAt" | "enabled">) => void;
+  onSave: (data: Omit<EventType, "id" | "createdAt" | "isActive">) => void;
   onCancel: () => void;
 }) {
   const [form, setForm] = useState<FormState>(
     initial
-      ? { title: initial.title, duration: String(initial.duration), description: initial.description, slug: initial.slug }
+      ? { title: initial.title, duration: String(initial.duration), description: initial.description || "", slug: initial.slug }
       : EMPTY_FORM
   );
 
@@ -141,11 +115,11 @@ function EventForm({
       </div>
 
       <div className="dialog-footer">
-        <button className="btn btn-ghost" onClick={onCancel}>
+        <Button variant="ghost" onClick={onCancel}>
           Cancel
-        </button>
-        <button
-          className="btn btn-primary"
+        </Button>
+        <Button
+          variant="primary"
           disabled={!valid}
           onClick={() =>
             onSave({
@@ -158,7 +132,7 @@ function EventForm({
           style={{ opacity: valid ? 1 : 0.45, cursor: valid ? "pointer" : "not-allowed" }}
         >
           {initial ? "Save changes" : "Create event type"}
-        </button>
+        </Button>
       </div>
     </>
   );
@@ -176,7 +150,7 @@ function EventItem({
   event: EventType;
   onEdit: (e: EventType) => void;
   onDelete: (id: string) => void;
-  onToggle: (id: string) => void;
+  onToggle: (id: string, currentStatus: boolean) => void;
   onCopyLink: (slug: string) => void;
 }) {
   return (
@@ -191,21 +165,32 @@ function EventItem({
       </div>
 
       <div className="event-item-actions">
-        {/* Copy link */}
-        <button
+        {/* External link */}
+        <a
+          href={`/book/${event.slug}`}
+          target="_blank"
+          rel="noopener noreferrer"
           className="icon-btn"
+          title="Go to booking page"
+        >
+          <ExternalLink size={14} />
+        </a>
+
+        {/* Copy link */}
+        <Button
+          variant="ghost"
           title="Copy link"
           onClick={() => onCopyLink(event.slug)}
         >
           <Link2 size={14} />
-        </button>
+        </Button>
 
         {/* Toggle enabled */}
         <Switch.Root
           className="switch-root"
-          checked={event.enabled}
-          onCheckedChange={() => onToggle(event.id)}
-          aria-label={event.enabled ? "Disable event type" : "Enable event type"}
+          checked={event.isActive}
+          onCheckedChange={() => onToggle(event.id, event.isActive)}
+          aria-label={event.isActive ? "Disable event type" : "Enable event type"}
         >
           <Switch.Thumb className="switch-thumb" />
         </Switch.Root>
@@ -241,7 +226,8 @@ function EventItem({
 
 export function EventTypesClient() {
   const [events, setEvents] = useState<EventType[]>([]);
-  const [hydrated, setHydrated] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Dialog state
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -251,26 +237,28 @@ export function EventTypesClient() {
   const [toastOpen, setToastOpen] = useState(false);
   const [toastMsg, setToastMsg] = useState("");
 
-  // Load from localStorage on mount
-  useEffect(() => {
+  const fetchEvents = useCallback(async () => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      setEvents(raw ? JSON.parse(raw) : DEFAULT_EVENTS);
-    } catch {
-      setEvents(DEFAULT_EVENTS);
+      setIsLoading(true);
+      const res = await fetch('/api/event-types');
+      if (res.ok) {
+        const data = await res.json();
+        setEvents(data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch events", error);
+    } finally {
+      setIsLoading(false);
     }
-    setHydrated(true);
   }, []);
 
-  // Persist to localStorage whenever events change (after hydration)
   useEffect(() => {
-    if (hydrated) localStorage.setItem(STORAGE_KEY, JSON.stringify(events));
-  }, [events, hydrated]);
+    fetchEvents();
+  }, [fetchEvents]);
 
   const showToast = (msg: string) => {
     setToastMsg(msg);
     setToastOpen(false);
-    // small delay so closing/reopening triggers animation
     setTimeout(() => setToastOpen(true), 10);
   };
 
@@ -285,36 +273,74 @@ export function EventTypesClient() {
   };
 
   const handleSave = useCallback(
-    (data: Omit<EventType, "id" | "createdAt" | "enabled">) => {
-      if (editingEvent) {
-        setEvents((prev) =>
-          prev.map((e) => (e.id === editingEvent.id ? { ...e, ...data } : e))
-        );
-        showToast("Event type updated");
-      } else {
-        const newEvent: EventType = {
-          ...data,
-          id: uid(),
-          enabled: true,
-          createdAt: new Date().toISOString(),
-        };
-        setEvents((prev) => [...prev, newEvent]);
-        showToast("Event type created");
+    async (data: Omit<EventType, "id" | "createdAt" | "isActive">) => {
+      try {
+        if (editingEvent) {
+          const res = await fetch(`/api/event-types/${editingEvent.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+          });
+          if (res.ok) {
+            await fetchEvents();
+            showToast("Event type updated");
+          } else {
+            showToast("Failed to update event type");
+          }
+        } else {
+          const res = await fetch('/api/event-types', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+          });
+          if (res.ok) {
+            await fetchEvents();
+            showToast("Event type created");
+          } else {
+            showToast("Failed to create event type. Slug might be invalid.");
+          }
+        }
+      } catch (error) {
+        console.error("Failed to save event", error);
+        showToast("An error occurred");
       }
       setDialogOpen(false);
     },
-    [editingEvent]
+    [editingEvent, fetchEvents]
   );
 
-  const handleDelete = useCallback((id: string) => {
-    setEvents((prev) => prev.filter((e) => e.id !== id));
-    showToast("Event type deleted");
-  }, []);
+  const handleDelete = useCallback(async (id: string) => {
+    try {
+      const res = await fetch(`/api/event-types/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        await fetchEvents();
+        showToast("Event type deleted");
+      } else {
+        showToast("Failed to delete event type");
+      }
+    } catch (error) {
+      console.error("Failed to delete event", error);
+    }
+  }, [fetchEvents]);
 
-  const handleToggle = useCallback((id: string) => {
-    setEvents((prev) =>
-      prev.map((e) => (e.id === id ? { ...e, enabled: !e.enabled } : e))
-    );
+  const handleToggle = useCallback(async (id: string, currentStatus: boolean) => {
+    // Optimistic update
+    setEvents(prev => prev.map(e => e.id === id ? { ...e, isActive: !currentStatus } : e));
+    try {
+      const res = await fetch(`/api/event-types/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isActive: !currentStatus }),
+      });
+      if (!res.ok) {
+        // Revert on failure
+        setEvents(prev => prev.map(e => e.id === id ? { ...e, isActive: currentStatus } : e));
+        showToast("Failed to update status");
+      }
+    } catch (error) {
+      setEvents(prev => prev.map(e => e.id === id ? { ...e, isActive: currentStatus } : e));
+      console.error("Failed to toggle status", error);
+    }
   }, []);
 
   const handleCopyLink = useCallback((slug: string) => {
@@ -322,8 +348,13 @@ export function EventTypesClient() {
     navigator.clipboard.writeText(url).then(() => showToast("Link copied to clipboard"));
   }, []);
 
-  // Prevent SSR mismatch — render nothing until hydrated
-  if (!hydrated) return null;
+  if (isLoading) {
+    return (
+      <div className="placeholder-page" style={{ height: "100%", justifyContent: "center" }}>
+        <Loader2 className="animate-spin text-ink-muted" size={32} style={{ animation: "spin 1s linear infinite" }} />
+      </div>
+    );
+  }
 
   return (
     <Toast.Provider swipeDirection="right">
@@ -334,10 +365,22 @@ export function EventTypesClient() {
           <p>Configure different events for people to book on your calendar.</p>
         </div>
 
-        <button className="btn btn-primary" onClick={openCreate}>
-          <Plus size={14} />
-          New
-        </button>
+        <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+          <div className="search-input-container" style={{ position: "relative" }}>
+            <Search size={14} style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "var(--ink-muted)" }} />
+            <input 
+              className="form-input" 
+              placeholder="Search" 
+              style={{ paddingLeft: "32px", width: "180px", height: "32px", fontSize: "14px" }} 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+          <Button variant="primary" onClick={openCreate}>
+            <Plus size={14} />
+            New
+          </Button>
+        </div>
       </div>
 
       {/* Page body */}
@@ -349,14 +392,16 @@ export function EventTypesClient() {
             </div>
             <h3>No event types yet</h3>
             <p>Create your first event type and start accepting bookings.</p>
-            <button className="btn btn-primary" onClick={openCreate}>
+            <Button variant="primary" onClick={openCreate}>
               <Plus size={14} />
               New event type
-            </button>
+            </Button>
           </div>
         ) : (
           <div className="event-list">
-            {events.map((event) => (
+            {events
+              .filter(event => event.title.toLowerCase().includes(searchQuery.toLowerCase()))
+              .map((event) => (
               <EventItem
                 key={event.id}
                 event={event}
@@ -413,3 +458,4 @@ export function EventTypesClient() {
     </Toast.Provider>
   );
 }
+

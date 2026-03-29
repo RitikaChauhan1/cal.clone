@@ -5,51 +5,10 @@ import * as Tabs from "@radix-ui/react-tabs";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import * as Toast from "@radix-ui/react-toast";
 import * as Dialog from "@radix-ui/react-dialog";
-import { MoreHorizontal, Calendar, Clock, XCircle, X, BookOpen } from "lucide-react";
+import { MoreHorizontal, XCircle, X, BookOpen, Loader2 } from "lucide-react";
 import type { Booking, BookingStatus } from "@/types";
-
-// ─── Seed data ───────────────────────────────────────────────────────────────
-
-const SEED_BOOKINGS: Booking[] = [
-  {
-    id: "b1",
-    title: "30 min meeting",
-    attendee: "Priya Sharma",
-    date: "2026-04-02",
-    startTime: "10:00",
-    endTime: "10:30",
-    status: "upcoming",
-  },
-  {
-    id: "b2",
-    title: "Quick sync",
-    attendee: "Arjun Mehta",
-    date: "2026-04-05",
-    startTime: "14:00",
-    endTime: "14:15",
-    status: "upcoming",
-  },
-  {
-    id: "b3",
-    title: "30 min meeting",
-    attendee: "Sara Khan",
-    date: "2026-03-20",
-    startTime: "11:00",
-    endTime: "11:30",
-    status: "past",
-  },
-  {
-    id: "b4",
-    title: "Quick sync",
-    attendee: "Rohan Verma",
-    date: "2026-03-15",
-    startTime: "09:00",
-    endTime: "09:15",
-    status: "past",
-  },
-];
-
-const STORAGE_KEY = "cal_bookings";
+import { Button } from "@/components/ui/Button";
+import { format } from "date-fns";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -58,12 +17,10 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
 }
 
-function formatTime(t: string): string {
-  const [hStr, mStr] = t.split(":");
-  const h = parseInt(hStr);
-  const ampm = h < 12 ? "am" : "pm";
-  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-  return `${h12}:${mStr}${ampm}`;
+function formatTime(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return format(d, "h:mm aaa");
 }
 
 // Group upcoming bookings by date label
@@ -114,9 +71,9 @@ function BookingRow({
         <div className="booking-actions">
           <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>
-              <button className="icon-btn" title="More options">
+              <Button variant="ghost" className="icon-btn" title="More options" style={{ padding: 0 }}>
                 <MoreHorizontal size={14} />
-              </button>
+              </Button>
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
               <DropdownMenu.Content className="dropdown-content" align="end" sideOffset={4}>
@@ -155,41 +112,61 @@ export function BookingsClient() {
   const [hydrated, setHydrated] = useState(false);
   const [activeTab, setActiveTab] = useState<BookingStatus>("upcoming");
 
-  // Confirm cancel dialog
   const [cancelTarget, setCancelTarget] = useState<Booking | null>(null);
-
-  // Toast
   const [toastOpen, setToastOpen] = useState(false);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      setBookings(raw ? JSON.parse(raw) : SEED_BOOKINGS);
-    } catch {
-      setBookings(SEED_BOOKINGS);
-    }
-    setHydrated(true);
+    fetch("/api/bookings")
+      .then((res) => res.json())
+      .then((data) => setBookings(data.bookings ?? []))
+      .catch(console.error)
+      .finally(() => setHydrated(true));
   }, []);
 
-  useEffect(() => {
-    if (hydrated) localStorage.setItem(STORAGE_KEY, JSON.stringify(bookings));
-  }, [bookings, hydrated]);
-
-  if (!hydrated) return null;
-
-  const handleConfirmCancel = () => {
-    if (!cancelTarget) return;
-    setBookings((prev) =>
-      prev.map((b) => b.id === cancelTarget.id ? { ...b, status: "cancelled" } : b)
+  if (!hydrated) {
+    return (
+      <div style={{ display: "flex", justifyContent: "center", padding: "4rem 0", color: "var(--ink-muted)" }}>
+        <Loader2 size={24} className="spin" />
+      </div>
     );
+  }
+
+  const handleConfirmCancel = async () => {
+    if (!cancelTarget) return;
+    try {
+      const res = await fetch(`/api/bookings/${cancelTarget.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "CANCELLED" }),
+      });
+      if (res.ok) {
+        setBookings((prev) =>
+          prev.map((b) => b.id === cancelTarget.id ? { ...b, status: "cancelled" } : b)
+        );
+      }
+    } catch (e) {
+      console.error("Failed to cancel booking", e);
+    }
     setCancelTarget(null);
     setToastOpen(false);
     setTimeout(() => setToastOpen(true), 10);
   };
 
-  const upcoming = bookings.filter((b) => b.status === "upcoming").sort((a, b) => a.date.localeCompare(b.date));
-  const past = bookings.filter((b) => b.status === "past").sort((a, b) => b.date.localeCompare(a.date));
-  const cancelled = bookings.filter((b) => b.status === "cancelled").sort((a, b) => b.date.localeCompare(a.date));
+  // Derive upcoming/past from date at render time so stale DB status never misleads
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+
+  const upcoming = bookings
+    .filter((b) => b.status !== "cancelled" && new Date(b.date + "T00:00:00") >= now)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const past = bookings
+    .filter((b) => b.status !== "cancelled" && new Date(b.date + "T00:00:00") < now)
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  const cancelled = bookings
+    .filter((b) => b.status === "cancelled")
+    .sort((a, b) => b.date.localeCompare(a.date));
 
   const upcomingGroups = groupByDate(upcoming);
 
@@ -285,15 +262,14 @@ export function BookingsClient() {
             </Dialog.Close>
             <div className="dialog-footer">
               <Dialog.Close asChild>
-                <button className="btn btn-ghost">Keep booking</button>
+                <Button variant="ghost">Keep booking</Button>
               </Dialog.Close>
-              <button
-                className="btn"
-                style={{ background: "var(--danger)", color: "#fff" }}
+              <Button
+                variant="danger"
                 onClick={handleConfirmCancel}
               >
                 Yes, cancel it
-              </button>
+              </Button>
             </div>
           </Dialog.Content>
         </Dialog.Portal>
