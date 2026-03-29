@@ -5,10 +5,8 @@ A full-stack Cal.com-inspired scheduling application that allows users to create
 ---
 
 ## Live Demo
-(Add your deployed link here)
+https://cal-clone-g7ro.onrender.com/event-types
 
-## GitHub Repository
-(Add your repository link here)
 
 ---
 
@@ -35,11 +33,17 @@ Database:
 - Add title, description, duration, and unique slug
 - Generate public booking links for each event
 
+<img width="1919" height="911" alt="image" src="https://github.com/user-attachments/assets/5302d4bf-348d-4f01-a5ff-acb128c444ca" />
+
+
 ### Availability Settings
 - Set available days (Monday–Sunday)
 - Define time slots (e.g., 9:00 AM – 5:00 PM)
 - Timezone-based scheduling
 - Support multiple availability profiles
+
+<img width="1919" height="905" alt="image" src="https://github.com/user-attachments/assets/01b9ab13-0a37-4021-baf2-ee9b362dafe2" />
+
 
 ### Public Booking Page
 - Dynamic route `/book/[slug]`
@@ -48,11 +52,16 @@ Database:
 - Booking form to collect name and email
 - Prevents double booking
 
+<img width="1919" height="907" alt="image" src="https://github.com/user-attachments/assets/709da6fb-ff84-44e4-8d7a-57adf2d257cd" />
+
+
 ### Bookings Dashboard
 - View upcoming bookings
 - View past bookings
 - Cancel bookings
 - Real-time status updates
+
+<img width="1919" height="899" alt="image" src="https://github.com/user-attachments/assets/79464b9d-7c0f-4fd9-a083-91ed21524fac" />
 
 ---
 
@@ -134,3 +143,8 @@ npm run dev
 ## Acknowledgment
 
 Built as part of a Fullstack SDE Intern assignment inspired by Cal.com.
+
+---
+# Developed BY:
+Name: Ritika Chauhan
+UID: 23BCS12506
