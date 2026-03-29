@@ -131,20 +131,12 @@ npm run dev
 
 ---
 
-## Future Improvements
-
-- Google Calendar integration
-- Email notifications
-- Rescheduling bookings
-- Authentication system
-
----
-
 ## Acknowledgment
 
 Built as part of a Fullstack SDE Intern assignment inspired by Cal.com.
 
 ---
-# Developed BY:
+
+## Developed BY:
 Name: Ritika Chauhan
 UID: 23BCS12506
