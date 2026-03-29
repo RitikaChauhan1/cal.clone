@@ -3,15 +3,14 @@ import { prisma } from '@/lib/prisma';
 
 export async function PUT(
   req: Request,
-  { params }: { params: { id: string } }
+  context: any // ✅ FIX: do NOT type params manually
 ) {
   try {
-    const id = params.id; // ✅ FIXED
+    const id = context.params.id;
 
     const body = await req.json();
     const { name, timezone, isDefault, days } = body;
 
-    // Only one default profile
     if (isDefault) {
       await prisma.availabilityProfile.updateMany({
         where: { id: { not: id }, isDefault: true },
@@ -29,7 +28,6 @@ export async function PUT(
       include: { slots: true },
     });
 
-    // Update slots
     if (days) {
       for (const [dayStr, schedule] of Object.entries(days)) {
         const dayOfWeek = parseInt(dayStr);
@@ -65,7 +63,7 @@ export async function PUT(
 
     return NextResponse.json(updatedProfile);
   } catch (error) {
-    console.error('Failed to update availability profile:', error);
+    console.error(error);
     return NextResponse.json(
       { error: 'Failed to update profile' },
       { status: 500 }
@@ -75,10 +73,10 @@ export async function PUT(
 
 export async function DELETE(
   req: Request,
-  { params }: { params: { id: string } }
+  context: any // ✅ FIX HERE ALSO
 ) {
   try {
-    const id = params.id; // ✅ FIXED
+    const id = context.params.id;
 
     const profile = await prisma.availabilityProfile.findUnique({
       where: { id },
@@ -95,7 +93,6 @@ export async function DELETE(
       where: { id },
     });
 
-    // Reassign default if needed
     if (profile.isDefault) {
       const remaining = await prisma.availabilityProfile.findFirst({
         orderBy: { createdAt: 'asc' },
@@ -111,7 +108,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Failed to delete availability profile:', error);
+    console.error(error);
     return NextResponse.json(
       { error: 'Failed to delete profile' },
       { status: 500 }
